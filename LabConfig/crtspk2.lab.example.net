@@ -1,0 +1,125 @@
+!
+hostname crtspk2
+!
+vrf definition CUST-L3VPN
+ rd 1:1
+ !
+ address-family ipv4
+ exit-address-family
+!
+enable secret 9 <REPLACE_WITH_ENABLE_SECRET_HASH>
+!
+aaa new-model
+!
+aaa session-id common
+!
+no ip domain lookup
+ip domain name lab.example.net
+!
+username lab-admin secret 9 <REPLACE_WITH_LOCAL_USER_SECRET_HASH>
+!
+crypto ikev2 proposal IKEv2-PROP1 
+ encryption aes-cbc-256
+ integrity sha512 sha384
+ group 19 14 21 5
+!
+crypto ikev2 policy IKEv2-POLICY1 
+ proposal IKEv2-PROP1
+!
+crypto ikev2 keyring RM-HUB-KEYRING
+ peer RM-HUB1
+  description hub-01 
+  address 198.51.100.10
+  identity fqdn hub-01.lab.example.net
+  pre-shared-key local <REPLACE_WITH_SPOKE2_LOCAL_PSK>
+  pre-shared-key remote <REPLACE_WITH_HUB_REMOTE_PSK>
+ !
+ peer RM-HUB2
+  description hub-02 
+  address 198.51.100.14
+  identity fqdn hub-02.lab.example.net
+  pre-shared-key local <REPLACE_WITH_SPOKE2_LOCAL_PSK>
+  pre-shared-key remote <REPLACE_WITH_HUB_REMOTE_PSK>
+ !
+!
+crypto ikev2 profile RM-HUB-IKEV2-PROFILE
+ match identity remote fqdn hub-01.lab.example.net
+ match identity remote fqdn hub-02.lab.example.net
+ identity local fqdn crtspk2.lab.example.net
+ authentication remote pre-share
+ authentication local pre-share
+ keyring local RM-HUB-KEYRING
+ dpd 10 3 on-demand
+! 
+crypto logging session
+crypto logging ikev2
+!
+crypto ipsec transform-set IPSEC-TSET1 esp-aes 256 esp-sha-hmac 
+ mode tunnel
+!
+crypto ipsec profile RM-HUB-IPSEC-PROFILE
+ set security-association lifetime kilobytes 4608001
+ set security-association lifetime seconds 3601
+ set transform-set IPSEC-TSET1 
+ set ikev2-profile RM-HUB-IKEV2-PROFILE
+!
+interface Loopback1
+ vrf forwarding CUST-L3VPN
+ ip address 10.255.6.6 255.255.255.255
+!
+interface Tunnel1
+ description FlexVPN to  Hub01 
+ vrf forwarding CUST-L3VPN
+ ip address 169.254.10.34 255.255.255.252
+ tunnel source GigabitEthernet1
+ tunnel destination 198.51.100.10
+ tunnel protection ipsec profile RM-HUB-IPSEC-PROFILE
+!
+interface Tunnel2
+ description FlexVPN to  Hub02 
+ vrf forwarding CUST-L3VPN
+ ip address 169.254.11.34 255.255.255.252
+ tunnel source GigabitEthernet1
+ tunnel destination 198.51.100.14
+ tunnel protection ipsec profile RM-HUB-IPSEC-PROFILE
+!
+interface GigabitEthernet1
+ ip dhcp client client-id ascii <REPLACE_WITH_DHCP_CLIENT_ID>
+ ip address 10.0.5.104 255.255.255.0
+ negotiation auto
+ no mop enabled
+ no mop sysid
+!
+interface GigabitEthernet2
+ vrf forwarding CUST-L3VPN
+ no ip address
+ shutdown
+ negotiation auto
+ no mop enabled
+ no mop sysid
+!
+router bgp 65006
+ bgp router-id 10.255.6.6
+ bgp log-neighbor-changes
+ bgp graceful-restart stalepath-time 120
+ bgp graceful-restart
+ bgp maxas-limit 50
+ no bgp default ipv4-unicast
+ !
+ address-family ipv4 vrf CUST-L3VPN
+  redistribute connected
+  neighbor 169.254.10.33 remote-as 65000
+  neighbor 169.254.10.33 description Hub01 
+  neighbor 169.254.10.33 password <REPLACE_WITH_BGP_PASSWORD>
+  neighbor 169.254.10.33 activate
+  neighbor 169.254.11.33 remote-as 65000
+  neighbor 169.254.11.33 description Hub02 
+  neighbor 169.254.11.33 password <REPLACE_WITH_BGP_PASSWORD>
+  neighbor 169.254.11.33 activate
+ exit-address-family
+!
+ip route 0.0.0.0 0.0.0.0 10.0.5.1
+!
+ntp source GigabitEthernet1
+ntp server 192.0.2.123
+!

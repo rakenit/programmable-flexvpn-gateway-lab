@@ -1,0 +1,53 @@
+# OS and editor metadata
+.DS_Store
+._*
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt
+*.csr
+*.der
+id_rsa*
+id_ed25519*
+
+# Logs and generated output
+*.log
+logs/
+debug/
+tmp/
+temp/
+
+# Network captures and device exports
+*.pcap
+*.pcapng
+*.har
+*.dmp
+*.core
+
+# Archives and binaries
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+*.rar
+*.bin
+*.iso
+*.qcow2
+*.vmdk
+
+# Tool caches
+.cache/
+.pytest_cache/
+__pycache__/

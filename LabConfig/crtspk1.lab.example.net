@@ -1,0 +1,145 @@
+!
+hostname crtspk1
+!
+boot-start-marker
+boot-end-marker
+!
+vrf definition CUST-L3VPN
+ rd 1:1
+ !
+ address-family ipv4
+ exit-address-family
+!
+enable secret 9 <REPLACE_WITH_ENABLE_SECRET_HASH>
+!
+aaa new-model
+!
+aaa authorization network default local 
+!
+aaa session-id common
+!
+no ip domain lookup
+ip domain name lab.example.net
+!
+username lab-admin secret 9 <REPLACE_WITH_LOCAL_USER_SECRET_HASH>
+!
+crypto ikev2 proposal IKEv2-PROP1 
+ encryption aes-cbc-256
+ integrity sha512 sha384
+ group 19 14 21 5
+no crypto ikev2 proposal default
+!
+crypto ikev2 policy IKEv2-POLICY1 
+ proposal IKEv2-PROP1
+no crypto ikev2 policy default
+!
+crypto ikev2 keyring RM-HUB-KEYRING
+ peer RM-HUB1
+  description hub-01 
+  address 198.51.100.10
+  identity fqdn hub-01.lab.example.net
+  pre-shared-key local <REPLACE_WITH_SPOKE1_LOCAL_PSK>
+  pre-shared-key remote <REPLACE_WITH_HUB_REMOTE_PSK>
+ !
+ peer RM-HUB2
+  description hub-02 
+  address 198.51.100.14
+  identity fqdn hub-02.lab.example.net
+  pre-shared-key local <REPLACE_WITH_SPOKE1_LOCAL_PSK>
+  pre-shared-key remote <REPLACE_WITH_HUB_REMOTE_PSK>
+ !
+!
+crypto ikev2 profile RM-HUB-IKEV2-PROFILE
+ match identity remote fqdn hub-01.lab.example.net
+ match identity remote fqdn hub-02.lab.example.net
+ identity local fqdn crtspk1.lab.example.net
+ authentication remote pre-share
+ authentication local pre-share
+ keyring local RM-HUB-KEYRING
+ dpd 30 6 on-demand
+!
+crypto ikev2 nat keepalive 30
+!
+crypto ipsec transform-set IPSEC-TSET1 esp-aes 256 esp-sha-hmac 
+ mode tunnel
+!
+crypto ipsec nat-transparency spi-matching
+!
+crypto ipsec profile RM-HUB-IPSEC-PROFILE
+ set security-association lifetime kilobytes 4608001
+ set security-association lifetime seconds 3601
+ set security-policy limit 1
+ set transform-set IPSEC-TSET1 
+ set ikev2-profile RM-HUB-IKEV2-PROFILE
+
+!
+interface Loopback1
+ vrf forwarding CUST-L3VPN
+ ip address 10.255.5.5 255.255.255.255
+!
+interface Tunnel1
+ description to hub-01.lab.example.net
+ vrf forwarding CUST-L3VPN
+ ip address 169.254.10.30 255.255.255.252
+ ip mtu 1400
+ ip tcp adjust-mss 1360
+ tunnel source GigabitEthernet1
+ tunnel mode ipsec ipv4
+ tunnel destination 198.51.100.10
+ tunnel path-mtu-discovery
+ tunnel protection ipsec profile RM-HUB-IPSEC-PROFILE
+ crypto ipsec df-bit clear
+!
+interface Tunnel2
+ description to hub-02.lab.example.net
+ vrf forwarding CUST-L3VPN
+ ip address 169.254.11.30 255.255.255.252
+ ip mtu 1400
+ ip tcp adjust-mss 1360
+ tunnel source GigabitEthernet1
+ tunnel mode ipsec ipv4
+ tunnel destination 198.51.100.14
+ tunnel path-mtu-discovery
+ tunnel protection ipsec profile RM-HUB-IPSEC-PROFILE
+ crypto ipsec df-bit clear
+!
+interface GigabitEthernet1
+ ip address 10.0.2.103 255.255.255.0
+ negotiation auto
+ no mop enabled
+ no mop sysid
+!
+interface GigabitEthernet2
+ no ip address
+ shutdown
+ negotiation auto
+ no mop enabled
+ no mop sysid
+!
+router bgp 65005
+ bgp router-id 10.255.5.5
+ bgp log-neighbor-changes
+ network 10.255.5.5 mask 255.255.255.255
+ !
+ address-family ipv4 vrf CUST-L3VPN
+  redistribute connected
+  neighbor 169.254.10.29 remote-as 65000
+  neighbor 169.254.10.29 description Hub01 
+  neighbor 169.254.10.29 password <REPLACE_WITH_BGP_PASSWORD>
+  neighbor 169.254.10.29 activate
+  neighbor 169.254.11.29 remote-as 65000
+  neighbor 169.254.11.29 description Hub02 
+  neighbor 169.254.11.29 password <REPLACE_WITH_BGP_PASSWORD>
+  neighbor 169.254.11.29 activate
+ exit-address-family
+!
+ip forward-protocol nd
+no ip http server
+ip http authentication local
+no ip http secure-server
+!
+ip route 0.0.0.0 0.0.0.0 10.0.2.1
+!
+ntp source GigabitEthernet1
+ntp server 192.0.2.123
+!

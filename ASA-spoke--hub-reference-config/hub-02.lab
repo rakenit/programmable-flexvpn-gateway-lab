@@ -1,0 +1,117 @@
+
+policy-map RM-500MB-OUT
+ class class-default
+ police 500000000  conform-action transmit exceed-action drop
+ 
+!
+aaa authorization network RM-ASA-USR-LOCAL  local
+aaa authorization network RM-ASA-GRP-LOCAL  local
+!
+crypto ikev2 authorization policy 203.0.113.36
+ no route accept
+ aaa attribute list RM-ASA-203.0.113.36
+!
+crypto ikev2 authorization policy rm-grp-asa  
+ no route accept
+ ipsec flow-limit 1 
+ aaa attribute list RM-ASA-rm-grp-asa    
+!
+aaa attribute list RM-ASA-203.0.113.36
+ attribute type interface-config "ip address 169.254.11.13 255.255.255.252" 
+ attribute type interface-config "description Tunnel to ASA Spoke-203.0.113.36"
+!
+aaa attribute list RM-ASA-rm-grp-asa
+ attribute type interface-config "ip tcp adjust-mss 1360"
+ attribute type interface-config "ip mtu 1400"
+ attribute type interface-config "service-policy input RM-500MB-IN"
+ attribute type interface-config "service-policy output RM-500MB-OUT"
+ attribute type interface-config "vrf forwarding CUST-L3VPN"
+ attribute type interface-config "description Tunnel to ASA Spoke"
+!
+crypto ikev2 proposal IKEv2-PROP1 
+ encryption aes-cbc-256
+ integrity sha512 sha384
+ group 19 14 21 5
+ !
+crypto ikev2 policy IKEv2-POLICY1 
+ match fvrf PUBLIC 
+ match address local 198.51.100.21 
+ proposal IKEv2-PROP1
+! 
+crypto ikev2 keyring RM-ASA-KEYRING
+ peer RM-ASA-SPOKE1
+  description ASA Spoke1 
+  identity address 203.0.113.36
+  pre-shared-key local <REPLACE_WITH_ASA_LOCAL_PSK>
+  pre-shared-key remote <REPLACE_WITH_ASA_REMOTE_PSK>
+ !
+!
+!
+crypto ikev2 profile RM-ASA-IKEV2-PROFILE
+ description CUST-L3VPN-Profile for ASA Spokes
+ match fvrf PUBLIC 
+ match address local interface loopback10 
+ identity local address 198.51.100.21  
+ match identity remote address 203.0.113.36  
+ authentication remote pre-share
+ authentication local pre-share
+ keyring local RM-ASA-KEYRING
+ lifetime 86399
+ dpd 30 6 on-demand
+ aaa authorization user psk list RM-ASA-USR-LOCAL 
+ aaa authorization group psk list RM-ASA-GRP-LOCAL rm-grp-asa 
+ virtual-template 5 mode auto
+ no config-exchange request 
+ no shutdown
+! 
+crypto ipsec transform-set IPSEC-TSET1 esp-aes 256 esp-sha-hmac 
+ mode tunnel
+!
+crypto ipsec profile RM-ASA-IPSEC-PROFILE
+ set security-association lifetime kilobytes 4608001
+ set security-association lifetime seconds 3601
+ set security-policy limit 1
+ set transform-set IPSEC-TSET1 
+ set ikev2-profile RM-ASA-IKEV2-PROFILE
+!
+interface Virtual-Template5 type tunnel
+ description Template for ASA RM DVTI tunnels.
+ tunnel vrf PUBLIC
+ tunnel protection ipsec profile RM-ASA-IPSEC-PROFILE
+!
+crypto logging ikev2
+crypto logging session
+! 
+router bgp 65000
+ template peer-policy RM-ASA-SPOKES-POLICY
+  route-map RM-ASA-SPOKE-IPV4-IN in
+  route-map RM-ASA-SPOKE-IPV4-OUT out
+  soo 65000:300
+  soft-reconfiguration inbound
+  send-community both
+ exit-peer-policy
+ !
+ template peer-session RM-ASA-SPOKES-SESSION
+  transport path-mtu-discovery
+  transport connection-mode passive
+  description RM-ASA-SPOKES 
+  password <REPLACE_WITH_BGP_PASSWORD>
+  log-neighbor-changes
+  timers 3 10
+ exit-peer-session
+ !
+  neighbor 169.254.11.14 remote-as 65001
+  neighbor 169.254.11.14 inherit peer-session RM-ASA-SPOKES-SESSION
+  neighbor 169.254.11.14 description 203.0.113.36
+  neighbor 169.254.11.14 activate
+  neighbor 169.254.11.14 inherit peer-policy RM-ASA-SPOKES-POLICY
+!
+ip prefix-list RM-ASA-SPOKE-IPV4-NETWORKS seq 5 permit 10.100.0.0/16 ge 22 le 22
+!
+route-map RM-ASA-SPOKE-IPV4-OUT permit 10 
+!
+route-map RM-ASA-SPOKE-IPV4-IN permit 10 
+ match ip address RM-ASA-SPOKE-IPV4-NETWORKS
+ set community 65000:600 additive
+!
+!

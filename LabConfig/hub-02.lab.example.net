@@ -1,0 +1,346 @@
+!
+hostname hub-02
+!
+vrf definition JAIL
+!
+vrf definition Mgmt-intf
+ !
+ address-family ipv4
+ exit-address-family
+ !
+ address-family ipv6
+ exit-address-family
+!
+vrf definition PUBLIC
+ rd 65000:100
+ !
+ address-family ipv4
+  route-target export 65000:100
+  route-target import 65000:101
+  route-target import 65000:102
+  route-target import 65000:103
+  route-target import 65000:104
+  route-target import 65000:105
+ exit-address-family
+ !
+ address-family ipv6
+ exit-address-family
+!
+vrf definition CUST-L3VPN
+ rd 65000:200
+ !
+ address-family ipv4
+  route-target export 65000:200
+  route-target import 65000:201
+  route-target import 65000:202
+  route-target import 65000:203
+  route-target import 65000:204
+  route-target import 65000:205
+  route-target import 65000:200
+  route-target import 65000:900
+ exit-address-family
+ !
+ address-family ipv6
+ exit-address-family
+!
+enable secret 9 <REPLACE_WITH_ENABLE_SECRET_HASH>
+!
+aaa new-model
+!
+aaa group server radius RADIUS-AUTH
+ server name RADIUS
+ ip vrf forwarding CUST-L3VPN
+ ip radius source-interface GigabitEthernet2
+ deadtime 6
+!
+aaa authorization network default local 
+aaa authorization network RM-CRTR-PSK-RADIUS group RADIUS-AUTH group radius 
+aaa authorization network RM-ASA-PSK-RADIUS group RADIUS-AUTH group radius 
+aaa authorization network RM-CRTR-USR-RADIUS group RADIUS-AUTH group radius 
+aaa authorization network RM-CRTR-GRP-RADIUS group RADIUS-AUTH group radius 
+aaa authorization network RM-ASA-USR-RADIUS group RADIUS-AUTH group radius 
+aaa authorization network RM-ASA-GRP-RADIUS group RADIUS-AUTH group radius 
+aaa accounting update newinfo
+aaa accounting network RM-CRTR-ACCT start-stop group RADIUS-AUTH group radius
+aaa accounting network RM-ASA-ACCT start-stop group RADIUS-AUTH group radius
+!
+aaa server radius dynamic-author
+ client 172.28.28.10 vrf CUST-L3VPN server-key 0 <REPLACE_WITH_RADIUS_COA_SECRET>
+ port 3799
+ auth-type any
+!
+aaa session-id common
+!
+ip domain name lab.example.net
+!
+username lab-admin secret 9 <REPLACE_WITH_LOCAL_USER_SECRET_HASH>
+!
+crypto ikev2 proposal IKEv2-PROP1 
+ encryption aes-cbc-256
+ prf sha512
+ integrity sha512 sha384
+ group 19 14 21 5
+!
+crypto ikev2 policy IKEv2-POLICY1 
+ match fvrf PUBLIC
+ match address local 198.51.100.14
+ proposal IKEv2-PROP1
+!
+crypto ikev2 keyring MYKEYS
+ peer SPOKES
+  address 0.0.0.0 0.0.0.0
+  pre-shared-key <REPLACE_WITH_DEFAULT_SPOKE_PSK>
+ !
+!
+!
+crypto ikev2 profile default
+ match fvrf PUBLIC
+ match identity remote address 0.0.0.0 
+ authentication remote pre-share
+ authentication local pre-share
+ keyring local MYKEYS
+ aaa authorization group psk list default default
+ virtual-template 1
+!
+! For AAA RADIUS user and group authorization, username will be remote IKEv2 ID if not specified. Password is manually set.
+! see command "aaa authorization user/group psk list <listname> <username> password <pwd>" under "crypto ikev2 profile <>" section.  
+!
+crypto ikev2 profile RM-ASA-IKEV2-PROFILE
+ description CUST-L3VPN-Profile for ASA Spokes
+ match fvrf PUBLIC
+ match address local interface GigabitEthernet1
+ match identity remote address 203.0.113.36 255.255.255.255 
+ identity local address 198.51.100.14
+ authentication remote pre-share
+ authentication local pre-share
+ keyring aaa RM-ASA-PSK-RADIUS password <REPLACE_WITH_HUB02_ASA_RADIUS_LOOKUP_PASSWORD>
+ lifetime 86399
+ dpd 90 6 on-demand
+ aaa authorization group psk list RM-ASA-GRP-RADIUS rm-grp-asa password <REPLACE_WITH_ASA_GROUP_PASSWORD>
+ aaa authorization user psk list RM-ASA-USR-RADIUS password <REPLACE_WITH_HUB02_ASA_RADIUS_LOOKUP_PASSWORD>
+ aaa accounting psk RM-ASA-ACCT
+ virtual-template 5 mode auto
+ no config-exchange request
+!
+crypto ikev2 profile RM-CRTR-IKEV2-PROFILE
+ description CUST-L3VPN-Profile for Cisco Router Spokes
+ match fvrf PUBLIC
+ match address local interface GigabitEthernet1
+ match identity remote fqdn crtspk1.lab.example.net
+ match identity remote fqdn crtspk2.lab.example.net
+ identity local fqdn hub-02.lab.example.net
+ authentication remote pre-share
+ authentication local pre-share
+ keyring aaa RM-CRTR-PSK-RADIUS password <REPLACE_WITH_HUB02_ROUTER_RADIUS_LOOKUP_PASSWORD>
+ lifetime 86399
+ dpd 90 6 on-demand
+ aaa authorization group psk list RM-CRTR-GRP-RADIUS rm-grp-crtr password <REPLACE_WITH_ROUTER_GROUP_PASSWORD>
+ aaa authorization user psk list RM-CRTR-USR-RADIUS password <REPLACE_WITH_HUB02_ROUTER_RADIUS_LOOKUP_PASSWORD>
+ aaa accounting psk RM-CRTR-ACCT
+ virtual-template 6 mode auto
+ no config-exchange request
+!
+crypto ikev2 cookie-challenge 100
+!
+policy-map RM-100MB-IN
+ class class-default
+  police 100000000 conform-action transmit  exceed-action drop 
+policy-map RM-500MB-OUT
+ class class-default
+  police 500000000 conform-action transmit  exceed-action drop 
+policy-map RM-500MB-IN
+ class class-default
+  police 500000000 conform-action transmit  exceed-action drop 
+policy-map RM-100MB-OUT
+ class class-default
+  police 100000000 conform-action transmit  exceed-action drop 
+! 
+crypto logging session
+crypto logging ikev2
+!
+crypto isakmp invalid-spi-recovery
+!
+crypto ipsec transform-set LEGACY-DMVPN-TSET esp-3des esp-md5-hmac 
+ mode transport
+crypto ipsec transform-set IPSEC-TSET1 esp-aes 256 esp-sha-hmac 
+ mode tunnel
+crypto ipsec nat-transparency spi-matching
+!
+crypto ipsec profile RM-ASA-IPSEC-PROFILE
+ set security-association lifetime kilobytes 4608001
+ set security-association lifetime seconds 3601
+ set security-policy limit 1
+ set transform-set IPSEC-TSET1 
+ set ikev2-profile RM-ASA-IKEV2-PROFILE
+!
+crypto ipsec profile RM-CRTR-IPSEC-PROFILE
+ set security-association lifetime kilobytes 4608001
+ set security-association lifetime seconds 3601
+ set security-policy limit 1
+ set transform-set IPSEC-TSET1 
+ set ikev2-profile RM-CRTR-IKEV2-PROFILE
+!
+crypto ipsec profile default
+ set ikev2-profile default
+!
+interface GigabitEthernet1
+ description Internet
+ vrf forwarding PUBLIC
+ ip address 198.51.100.14 255.255.255.252
+ negotiation auto
+ no mop enabled
+ no mop sysid
+!
+interface GigabitEthernet2
+ vrf forwarding CUST-L3VPN
+ ip address 172.28.28.3 255.255.255.0
+ standby 1 ip 172.28.28.1
+ standby 1 priority 50
+ negotiation auto
+ no mop enabled
+ no mop sysid
+!
+interface GigabitEthernet3
+ no ip address
+ shutdown
+ negotiation auto
+ no mop enabled
+ no mop sysid
+!
+interface GigabitEthernet4
+ no ip address
+ shutdown
+ negotiation auto
+ no mop enabled
+ no mop sysid
+!
+interface Virtual-Template1 type tunnel
+ vrf forwarding CUST-L3VPN
+ no ip address
+ ip mtu 1400
+ ip tcp adjust-mss 1360
+ tunnel source GigabitEthernet1
+ tunnel vrf PUBLIC
+ tunnel protection ipsec profile default
+!
+interface Virtual-Template5 type tunnel
+ description Template for all ASA RM DVTI tunnels.
+ no ip address
+ tunnel vrf PUBLIC
+ tunnel protection ipsec profile RM-ASA-IPSEC-PROFILE
+!
+interface Virtual-Template6 type tunnel
+ description Template for all Cisco router RM DVTI tunnels.
+ no ip address
+ tunnel vrf PUBLIC
+ tunnel protection ipsec profile RM-CRTR-IPSEC-PROFILE
+!
+router bgp 65000
+ template peer-policy RM-ASA-SPOKES-POLICY
+  route-map RM-ASA-SPOKE-IPV4-IN in
+  route-map RM-ASA-SPOKE-IPV4-OUT out
+  soo 65000:0
+  soft-reconfiguration inbound
+  send-community both
+ exit-peer-policy
+ !
+ template peer-policy RM-CRTR-SPOKES-POLICY
+  route-map RM-CRTR-SPOKE-IPV4-IN in
+  route-map RM-CRTR-SPOKE-IPV4-OUT out
+  soo 65000:0
+  soft-reconfiguration inbound
+  send-community both
+ exit-peer-policy
+ !
+ template peer-session RM-ASA-SPOKES-SESSION
+  transport path-mtu-discovery
+  transport connection-mode passive
+  description RM-ASA-SPOKES 
+  password <REPLACE_WITH_BGP_PASSWORD>
+  log-neighbor-changes
+  timers 3 10
+ exit-peer-session
+ !
+ template peer-session RM-CRTR-SPOKES-SESSION
+  transport path-mtu-discovery
+  transport connection-mode passive
+  description RM-CRTR-SPOKES 
+  password <REPLACE_WITH_BGP_PASSWORD>
+  log-neighbor-changes
+  timers 3 10
+ exit-peer-session
+ !
+ bgp router-id 10.255.0.2
+ bgp log-neighbor-changes
+ bgp graceful-restart stalepath-time 120
+ bgp graceful-restart
+ bgp maxas-limit 50
+ no bgp default ipv4-unicast
+ !
+ address-family ipv4
+ exit-address-family
+ !
+ address-family ipv4 vrf CUST-L3VPN
+  network 172.28.28.0 mask 255.255.255.0
+  neighbor 169.254.11.14 remote-as 65001
+  neighbor 169.254.11.14 inherit peer-session RM-ASA-SPOKES-SESSION
+  neighbor 169.254.11.14 description 203.0.113.36
+  neighbor 169.254.11.14 activate
+  neighbor 169.254.11.14 inherit peer-policy RM-ASA-SPOKES-POLICY
+  neighbor 169.254.11.18 remote-as 65002
+  neighbor 169.254.11.18 inherit peer-session RM-ASA-SPOKES-SESSION
+  neighbor 169.254.11.18 description ASA Spoke 2 placeholder
+  neighbor 169.254.11.18 activate
+  neighbor 169.254.11.18 inherit peer-policy RM-ASA-SPOKES-POLICY
+  neighbor 169.254.11.30 remote-as 65005
+  neighbor 169.254.11.30 inherit peer-session RM-CRTR-SPOKES-SESSION
+  neighbor 169.254.11.30 description crtspk1.lab.example.net
+  neighbor 169.254.11.30 activate
+  neighbor 169.254.11.30 inherit peer-policy RM-CRTR-SPOKES-POLICY
+  neighbor 169.254.11.34 remote-as 65006
+  neighbor 169.254.11.34 inherit peer-session RM-CRTR-SPOKES-SESSION
+  neighbor 169.254.11.34 description crtspk2.lab.example.net
+  neighbor 169.254.11.34 activate
+  neighbor 169.254.11.34 inherit peer-policy RM-CRTR-SPOKES-POLICY
+ exit-address-family
+!
+ip route vrf PUBLIC 0.0.0.0 0.0.0.0 198.51.100.13
+!
+ip access-list extended DENY-ALL-IN
+ deny   ip any any
+ip access-list extended DENY-ALL-OUT
+ deny   ip any any
+ip access-list extended PERMIT-ALL-IN
+ permit ip any any
+ip access-list extended PERMIT-ALL-OUT
+ permit ip any any
+!
+route-map RM-CRTR-SPOKE-IPV4-IN permit 10 
+!
+route-map RM-ASA-SPOKE-IPV4-OUT permit 10 
+!
+route-map RM-ASA-SPOKE-IPV4-IN permit 10 
+!
+route-map RM-CRTR-SPOKE-IPV4-OUT permit 10 
+!
+radius-server attribute 44 include-in-access-req all
+radius-server attribute 44 extend-with-addr
+radius-server attribute 6 on-for-login-auth
+radius-server attribute 6 support-multiple
+radius-server attribute 8 include-in-access-req
+radius-server attribute 32 include-in-access-req format hub-02
+radius-server attribute 32 include-in-accounting-req format hub-02
+radius-server attribute 55 include-in-acct-req
+radius-server attribute 55 access-request include
+radius-server dead-criteria time 5 tries 4
+radius-server source-ports extended
+radius-server deadtime 6
+radius-server unique-ident 5
+!
+radius server RADIUS
+ address ipv4 172.28.28.10 auth-port 1812 acct-port 1813
+ key 0 <REPLACE_WITH_RADIUS_SHARED_SECRET>
+!
+ntp source GigabitEthernet1
+ntp server vrf PUBLIC 192.0.2.123
+!
