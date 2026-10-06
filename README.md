@@ -5,9 +5,8 @@ gateway concept built on routed tunnel interfaces, centralized RADIUS policy,
 and dynamic per-tunnel configuration.
 
 This repository packages a programmable VPN gateway proof of concept as a public
-reference asset. Originally built as a 2018 proof of concept, this folder
-preserves the architecture and command patterns while replacing internal values,
-credentials, and environment-specific details. The lab explored how
+reference asset. This folder preserves the architecture and command patterns while
+replacing internal values,credentials, and environment-specific details. The lab explored how
 Cisco IOS XE hub routers could terminate IPsec/FlexVPN spokes, use RADIUS for
 IKEv2 pre-shared key and authorization data, and exchange management routes with
 spokes through BGP. The files have been sanitized and refreshed for public
